@@ -14,11 +14,10 @@ class Pretrainer(pl.LightningModule):
         warmup_steps=0,
         learning_rate=1e-4,
         adam_epsilon=1e-8,
-        total_steps=10000,
         weight_decay=0.0
     ):
         super().__init__()
-        self.save_hyperparameters('warmup_steps', 'learning_rate', 'adam_epsilon', 'total_steps', 'weight_decay')
+        self.save_hyperparameters('warmup_steps', 'learning_rate', 'adam_epsilon', 'weight_decay')
         self.model = model
         self.config = config
         self.tokenizer = tokenizer
@@ -28,7 +27,16 @@ class Pretrainer(pl.LightningModule):
     
     def training_step(self, batch, batch_idx):
         loss, logits = self(**batch)
+        self.log('train_loss', loss)
         return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss, logits = self(**batch)
+        self.log('val_loss', loss, prog_bar=True)
+
+    def test_step(self, batch, batch_idx):
+        loss, logits = self(**batch)
+        self.log('test_loss', loss, prog_bar=True)
 
     def configure_optimizers(self):
         "Prepare optimizer and schedule (linear warmup and decay)"
@@ -49,35 +57,3 @@ class Pretrainer(pl.LightningModule):
         )
         scheduler = {'scheduler': scheduler, 'interval': 'step', 'frequency': 1}
         return [optimizer], [scheduler]
-
-
-if __name__ == '__main__':
-    from data import WikiDataModule
-
-    dm = WikiDataModule(
-        tokenizer_name_or_path='wiki-test-3',
-        files = ["wikitext-103-raw/wiki.test.raw"],
-        max_vocab_size = 30000,
-        min_frequency = 2,
-        special_tokens = [
-            "<s>",
-            "<pad>",
-            "</s>",
-            "<unk>",
-            "<mask>",
-        ]
-    )
-    dm.prepare_data()
-    dm.setup('fit')
-    tokenizer = dm.tokenizer
-    config = RobertaConfig(
-        hidden_size=768,
-        intermediate_size=3072,
-        num_attention_heads=12,
-        num_hidden_layers=12,
-        vocab_size=len(tokenizer.get_vocab()),
-    )
-    model = RobertaForMaskedLM(config)
-    pretrainer = Pretrainer(model, config, tokenizer)
-    trainer = pl.Trainer(fast_dev_run=True)
-    trainer.fit(pretrainer, dm)
